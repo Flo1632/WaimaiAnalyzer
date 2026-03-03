@@ -1,53 +1,84 @@
-import pandas as pd
-import jieba
+import streamlit as st
 import joblib
-from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import CountVectorizer
-from sklearn.naive_bayes import MultinomialNB
-from sklearn.metrics import accuracy_score
-from sklearn.pipeline import make_pipeline
+import jieba
+# Übersetzer
+from deep_translator import GoogleTranslator
 
-# 1. Daten laden
-# entweder utf-8 oder gb2312
-try:
-    df = pd.read_csv('data/waimai_10k.csv', encoding='utf-8')
-except UnicodeDecodeError:
-    df = pd.read_csv('data/waimai_10k.csv', encoding='gb2312')
+# Seitenkonfiguartion
+st.set_page_config(page_title="Waimai Analyzer (Chinesische Essensrezensionen)", page_icon="🥡")
 
-print(f'Daten geladen: {len(df)} Zeilen')
-print(df.head())
+# Modell mit Caching laden
+@st.cache_resource
+def load_model():
+    model = joblib.load("model/waimai_model.pkl")
+    return model
 
-X_raw = df['review']
-y = df['label'] # 0/1 1 für positiv
-
-# Daten mit Jieba vorbereiten
-def prepare_text_for_sklearn(text):
-
+# Text wie im Training vorbereiten
+def prepare_text(text):
     tokens = jieba.lcut(str(text))
     return ' '.join(tokens)
 
-# 3. Funktion auf Daten anwenden
-X_prepared = X_raw.apply(prepare_text_for_sklearn) # apply ist wichtig, weil X_raw eine Pandas Series ist; apply() ist die Standardmethode in Pandas, um eine Funktion elementweise auf eine Series oder DataFrame-Spalte anzuwenden.
+# UI Aufbau
 
-print('\nBeispiel Vorher: ', X_raw.iloc[0])
-print('Beispiel Nachher: ', X_prepared.iloc[0])
-print('-'*30)
+st.title("Waimai Analyzer (Chinesische Essensrezensionen)")
+st.markdown("Dieses Tool analysiert chinesische Bewertungen (auf der Platform Waimai) und erkennt, ob die Rezensionen negativ oder positiv sind.")
 
-####### Training und Pipeline #######
-# CountVectorizer (zählt Wörter) und MultinomialNB (Naive Bayes - Standard für einfache Textklassifikation)
+# Model im Hintegrund laden
+model = load_model()
 
-X_train, X_test, y_train, y_test = train_test_split(X_prepared, y, test_size=0.2, random_state=1)
-# Pipeline bauen
+user_input = st.text_input("Bitte Rezension auf Chinesisch oder einer anderen Sprache eingeben und übersetzen lassen:", "Das Essen war kalt und der Fahrer unhöflich.")
+# Checkbox für Übersetzung
+translate_option = st.checkbox("Text automatisch ins Chinesische übersetzen?", value=True)
 
-# MultinomialNB lernt aus den von CountVectorizer gezählten Wörtern, erkennt aber keinen Kontext
-clf = make_pipeline(CountVectorizer(), MultinomialNB())
-clf.fit(X_train, y_train)
+if st.button('Analysieren'):
+    if user_input:
 
-# 4. Modell evaluieren
-y_pred = clf.predict(X_test)
-accuracy = accuracy_score(y_test, y_pred)
-print(f'\nModellgenauigkeit: {accuracy*100:.2f}%')
+        # --- Übersetzen (falls gewünscht) ---
+        final_text = user_input
 
-# 5. Modell speichern
-joblib.dump(clf, 'model/waimai_model.pkl')
-print("Modell gespeichert als 'waimai_model.pkl'")
+        if translate_option:
+            with st.spinner('Übersetze...'):
+                try:
+                    # source='auto' erkennt die Sprache automatisch
+                    # target='zh-CN' ist vereinfachtes Chinesisch (für Mainland China)
+                    translator = GoogleTranslator(source='auto', target='zh-CN')
+                    translated_text = translator.translate(user_input)
+
+                    st.info(f"🔤 Übersetzung: {translated_text}")
+                    final_text = translated_text  # Wir arbeiten mit dem chinesischen Text weiter
+                except Exception as e:
+                    st.error(f"Fehler bei der Übersetzung: {e}")
+
+        # Was aktuell passiert, Visualisierung für den Nutzer
+        st.subheader("1. Wie der Computer den Text sieht (Jieba Segmentation):")
+        processed_input = prepare_text(final_text)
+        tokens = jieba.lcut(final_text)
+        st.write(tokens)
+
+        # Vorhersage machen
+        prediction = model.predict([processed_input])[0]
+        probability = model.predict_proba([processed_input])[0]
+
+        # Ergebnis anzeigen
+        st.subheader("2. Ergebnis:")
+
+        # Wahrscheinlichkeiten für Negativ (Index 0) und Positiv (Index 1)
+        prob_neg = probability[0]
+        prob_pos = probability[1]
+
+        if prediction == 1:
+            st.success(f"Positiv! (Zu {prob_pos:.1%} sicher)")
+            st.balloons()  # visueller Effekt
+        else:
+            st.error(f"Negativ! (Zu {prob_neg:.1%} sicher)")
+
+            # Balkendiagramm für die Details
+            st.write("Detaillierte Wahrscheinlichkeit:")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Positiv 😋", f"{prob_pos:.2%}")
+            with col2:
+                st.metric("Negativ 😡", f"{prob_neg:.2%}")
+
+    else:
+        st.warning("Bitte gib erst einen Text ein.")

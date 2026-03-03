@@ -27,8 +27,8 @@
 
 ```
 WaimaiAnalyzer/
-├── app.py               # Streamlit web application
-├── main.py              # Model training script
+├── main.py               # Streamlit web application
+├── train.py              # Model training script
 ├── requirements.txt     # Python dependencies
 ├── data/
 │   └── waimai_10k.csv   # ~10,000 labelled Waimai reviews (0 = negative, 1 = positive)
